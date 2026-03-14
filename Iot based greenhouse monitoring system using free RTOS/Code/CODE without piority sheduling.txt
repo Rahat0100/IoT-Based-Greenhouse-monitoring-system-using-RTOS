@@ -1,0 +1,110 @@
+/*** BLYNK DETAILS ***/
+#define BLYNK_TEMPLATE_ID "TMPL6xoNeo6X_"
+#define BLYNK_TEMPLATE_NAME "greenhouse"
+#define BLYNK_AUTH_TOKEN "y4tgi5txmsaM4hUc935qqiPW3mPwc283"
+
+/*** DEBUG ***/
+#define BLYNK_PRINT Serial
+
+/*** LIBRARIES ***/
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <DHT.h>
+
+/*** WIFI ***/
+char ssid[] = "Zod";
+char pass[] = "moodchang";
+
+/*** PIN DEFINITIONS ***/
+#define DHTPIN 4          // D4
+#define DHTTYPE DHT11
+#define SOIL_PIN 36       // VP / GPIO36
+#define BUZZER 18         // D18
+#define RELAY1 26         // D26
+
+/*** OBJECTS ***/
+DHT dht(DHTPIN, DHTTYPE);
+BlynkTimer timer;
+
+/*** THRESHOLDS ***/
+int moistureThreshold = 40;   // %
+float tempHigh = 30.0;        // High temperature limit
+float tempLow  = 15.0;        // Low temperature limit
+
+/*** SENSOR FUNCTION ***/
+void readSensors() {
+  int soilRaw = analogRead(SOIL_PIN);
+  int soilPercent = map(soilRaw, 4095, 0, 0, 100);
+
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("DHT Sensor Error");
+    return;
+  }
+
+  // Pump control: moisture below threshold -> pump ON
+  if (soilPercent < moistureThreshold) {
+    digitalWrite(RELAY1, LOW);   // Active LOW relay -> ON
+  } else {
+    digitalWrite(RELAY1, HIGH);  // OFF
+  }
+
+  // Buzzer control: temperature too high or too low
+  if (temperature > tempHigh || temperature < tempLow) {
+    digitalWrite(BUZZER, HIGH);
+  } else {
+    digitalWrite(BUZZER, LOW);
+  }
+
+  // Send to Blynk
+  Blynk.virtualWrite(V0, soilPercent);
+  Blynk.virtualWrite(V1, temperature);
+  Blynk.virtualWrite(V2, humidity);
+
+  // Serial monitor
+  Serial.println("------ GREENHOUSE DATA ------");
+  Serial.print("Soil Moisture: ");
+  Serial.print(soilPercent);
+  Serial.println(" %");
+
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" C");
+
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+
+  Serial.print("Pump: ");
+  Serial.println(soilPercent < moistureThreshold ? "ON" : "OFF");
+
+  Serial.print("Buzzer: ");
+  Serial.println((temperature > tempHigh || temperature < tempLow) ? "ON" : "OFF");
+
+  Serial.println("-----------------------------");
+}
+
+/*** SETUP ***/
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(BUZZER, OUTPUT);
+  pinMode(RELAY1, OUTPUT);
+
+  digitalWrite(BUZZER, LOW);
+  digitalWrite(RELAY1, HIGH);   // Relay OFF initially
+
+  dht.begin();
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  timer.setInterval(2000L, readSensors);
+}
+
+/*** LOOP ***/
+void loop() {
+  Blynk.run();
+  timer.run();
+}

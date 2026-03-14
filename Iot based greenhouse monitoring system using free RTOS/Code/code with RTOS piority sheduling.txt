@@ -1,0 +1,258 @@
+/*** BLYNK DETAILS ***/
+#define BLYNK_TEMPLATE_ID "TMPL6xoNeo6X_"
+#define BLYNK_TEMPLATE_NAME "greenhouse"
+#define BLYNK_AUTH_TOKEN "y4tgi5txmsaM4hUc935qqiPW3mPwc283"
+
+#define BLYNK_PRINT Serial
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <DHT.h>
+
+/*** WIFI ***/
+char ssid[] = "Zod";
+char pass[] = "moodchang";
+
+/*** PIN DEFINITIONS ***/
+#define DHTPIN   4
+#define DHTTYPE  DHT11
+#define SOIL_PIN 36
+#define BUZZER   18
+#define RELAY1   26
+
+/*** OBJECTS ***/
+DHT dht(DHTPIN, DHTTYPE);
+
+/*** THRESHOLDS ***/
+int moistureThreshold = 10;
+float tempHigh = 34.0;
+float tempLow  = 15.0;
+
+/*** SHARED VARIABLES ***/
+int soilRaw = 0;
+int soilPercent = 0;
+float temperature = 0.0;
+float humidity = 0.0;
+bool pumpStarted = false;
+
+/*** TASK 1: SOIL SENSOR TASK (PRIORITY 2) ***/
+void TaskSoil(void *pvParameters)
+{
+  while (1)
+  {
+    soilRaw = analogRead(SOIL_PIN);
+    soilPercent = map(soilRaw, 4095, 0, 0, 100);
+
+    Serial.println("========== [SOIL TASK | P2] ==========");
+    Serial.print("Core          : ");
+    Serial.println(xPortGetCoreID());
+    Serial.print("Raw Value     : ");
+    Serial.println(soilRaw);
+    Serial.print("Moisture (%)  : ");
+    Serial.println(soilPercent);
+    Serial.println("======================================\n");
+
+    vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+}
+
+/*** TASK 2: DHT TASK (PRIORITY 2) ***/
+void TaskDHT(void *pvParameters)
+{
+  while (1)
+  {
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+
+    Serial.println("========== [DHT TASK | P2] ===========");
+
+    if (!isnan(t) && !isnan(h))
+    {
+      temperature = t;
+      humidity = h;
+
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.print("Temperature   : ");
+      Serial.print(temperature);
+      Serial.println(" C");
+      Serial.print("Humidity      : ");
+      Serial.print(humidity);
+      Serial.println(" %");
+    }
+    else
+    {
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.println("Sensor Status : READ FAILED");
+    }
+
+    Serial.println("======================================\n");
+
+    vTaskDelay(pdMS_TO_TICKS(3000));
+  }
+}
+
+/*** TASK 3: PUMP CONTROL TASK (PRIORITY 3) ***/
+void TaskPump(void *pvParameters)
+{
+  while (1)
+  {
+    Serial.println("========== [PUMP TASK | P3] ==========");
+
+    if (soilPercent < moistureThreshold)
+    {
+      digitalWrite(RELAY1, LOW);   // Active LOW relay
+      pumpStarted = true;
+
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.println("Condition     : LOW MOISTURE");
+      Serial.println("Pump Status   : ON");
+    }
+    else
+    {
+      digitalWrite(RELAY1, HIGH);
+      pumpStarted = false;
+
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.println("Condition     : MOISTURE NORMAL");
+      Serial.println("Pump Status   : OFF");
+    }
+
+    Serial.println("======================================\n");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+/*** TASK 4: BUZZER CONTROL TASK (PRIORITY 3) ***/
+void TaskBuzzer(void *pvParameters)
+{
+  while (1)
+  {
+    Serial.println("========= [BUZZER TASK | P3] =========");
+
+    if (temperature > tempHigh || temperature < tempLow)
+    {
+      digitalWrite(BUZZER, HIGH);
+
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.println("Temp Status   : ALERT");
+      Serial.println("Buzzer Status : ON");
+    }
+    else
+    {
+      digitalWrite(BUZZER, LOW);
+
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.println("Temp Status   : NORMAL");
+      Serial.println("Buzzer Status : OFF");
+    }
+
+    Serial.println("======================================\n");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+/*** TASK 5: BLYNK TASK (PRIORITY 1) ***/
+void TaskBlynk(void *pvParameters)
+{
+  while (1)
+  {
+    Serial.println("========== [BLYNK TASK | P1] =========");
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      if (!Blynk.connected())
+      {
+        Serial.print("Core          : ");
+        Serial.println(xPortGetCoreID());
+        Serial.println("WiFi Status   : CONNECTED");
+        Serial.println("Blynk Status  : CONNECTING...");
+        Blynk.connect(3000);
+      }
+
+      if (Blynk.connected())
+      {
+        Blynk.run();
+
+        Blynk.virtualWrite(V0, soilPercent);
+        Blynk.virtualWrite(V1, temperature);
+        Blynk.virtualWrite(V2, humidity);
+        Blynk.virtualWrite(V5, pumpStarted ? "PUMP ON" : "PUMP OFF");
+
+        Serial.print("Core          : ");
+        Serial.println(xPortGetCoreID());
+        Serial.println("WiFi Status   : CONNECTED");
+        Serial.println("Blynk Status  : CONNECTED");
+        Serial.println("Cloud Update  : SUCCESS");
+      }
+      else
+      {
+        Serial.print("Core          : ");
+        Serial.println(xPortGetCoreID());
+        Serial.println("WiFi Status   : CONNECTED");
+        Serial.println("Blynk Status  : NOT CONNECTED");
+      }
+    }
+    else
+    {
+      Serial.print("Core          : ");
+      Serial.println(xPortGetCoreID());
+      Serial.println("WiFi Status   : NOT CONNECTED");
+      Serial.println("Blynk Status  : OFFLINE");
+    }
+
+    Serial.println("======================================\n");
+
+    vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+}
+
+/*** SETUP ***/
+void setup()
+{
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("\n================================================");
+  Serial.println("   ESP32 RTOS GREENHOUSE SYSTEM (PRIORITY BASED)");
+  Serial.println("================================================\n");
+
+  pinMode(BUZZER, OUTPUT);
+  pinMode(RELAY1, OUTPUT);
+
+  digitalWrite(BUZZER, LOW);
+  digitalWrite(RELAY1, HIGH);   // Relay OFF initially
+
+  dht.begin();
+
+  WiFi.begin(ssid, pass);
+  Blynk.config(BLYNK_AUTH_TOKEN);
+
+  /*** CREATE TASKS WITH PRIORITY ***/
+  xTaskCreatePinnedToCore(TaskSoil,   "SoilTask",   4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(TaskDHT,    "DHTTask",    4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(TaskPump,   "PumpTask",   4096, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(TaskBuzzer, "BuzzerTask", 4096, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(TaskBlynk,  "BlynkTask",  8192, NULL, 1, NULL, 0);
+
+  Serial.println("Task creation completed.");
+  Serial.println("Priorities:");
+  Serial.println("Pump Task   -> 3");
+  Serial.println("Buzzer Task -> 3");
+  Serial.println("Soil Task   -> 2");
+  Serial.println("DHT Task    -> 2");
+  Serial.println("Blynk Task  -> 1\n");
+}
+
+/*** LOOP ***/
+void loop()
+{
+  vTaskDelay(pdMS_TO_TICKS(1000));
+}
